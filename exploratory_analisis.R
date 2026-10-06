@@ -5,6 +5,7 @@ library(tidyverse)
 library(janitor)
 library(skimr)
 library(naniar)
+library(rstatix)
 
 # Carga de datos
 ruta <- here("data", "input", "set_datos_lain_para_analisis.xlsx")
@@ -139,5 +140,70 @@ datos <- datos %>%
   
 # Visión general del conjunto de datos
 skimr::skim(datos)
+
+##########################
+### Análisis univariado
+
+## Temporal (todos los eventos, incluye duplicados)
+## Fecha del evento, semana epidemiologica
+## Número de eventos por mes; distribución semanal 
+
+
+
+
+## Demográfico (Personas únicas, evitar distorcionar la distribución)
+## Sexo, edad, nacionalidad 
+datos %>% 
+  filter(year(fecha_del_evento) %in% c(2023, 2024, 2025, 2026)) %>%
+  group_by(anio = year(fecha_del_evento)) %>%
+  summarise(
+    min = min(edad_calculada, na.rm = TRUE), 
+    max = max(edad_calculada, na.rm = TRUE),
+    media = mean(edad_calculada, na.rm = TRUE),
+    mediana = median(edad_calculada, na.rm = TRUE),
+    DE = sd(edad_calculada, na.rm = TRUE),
+    Q1 = quantile(edad_calculada, prob = c(0.25), na.rm = TRUE),
+    Q3 = quantile(edad_calculada, prob = c(0.75), na.rm = TRUE),
+    .groups = "drop"
+  )
+library(rstatix)
+rstatix::get_summary_stats(
+  edad_calculada,
+  type = "common"
+)
+
+
+
+
+## Identidad y pertenencia (Personas únicas, evitar distorcionar la distribución)
+## identidad de género, orientación sexual, pertenencia y pueblo originario
+
+## Residencia (Personas únicas, evitar distorcionar la distribución)
+## Región y comuna de residencia del paciente
+
+## Notificación (Total de eventos notificados)
+## Comuna y establecimiento de notificación
+
+## Características del evento (Total de eventos)
+## Subclasificación, método de lesión, lugar del evento
+
+## Salud mental (Personas únicas, evitar distorcionar la distribución)
+## Antecedentes, descripción libre, tratamiento
+
+## Contexto social (Total de eventos)
+## Acompañante, estudia/trabaja
+
+## Territorio de actividades(Total de eventos)
+## Región y comuna de estudios y/o trabajo
+
+
+
+
+
+
+
+
+
+
 
 
