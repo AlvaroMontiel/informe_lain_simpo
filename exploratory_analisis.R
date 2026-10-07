@@ -152,7 +152,7 @@ skimr::skim(datos)
 
 
 ## Demográfico (Personas únicas, evitar distorcionar la distribución)
-## Sexo, edad, nacionalidad 
+## edad, nacionalidad 
 datos %>% 
   filter(year(fecha_del_evento) %in% c(2023, 2024, 2025, 2026)) %>%
   group_by(anio = year(fecha_del_evento)) %>%
@@ -165,12 +165,25 @@ datos %>%
     Q1 = quantile(edad_calculada, prob = c(0.25), na.rm = TRUE),
     Q3 = quantile(edad_calculada, prob = c(0.75), na.rm = TRUE),
     .groups = "drop"
-  )
+  )  # Pendiente separar por personas únicas
 library(rstatix)
 rstatix::get_summary_stats(
   edad_calculada,
   type = "common"
 )
+
+# Sexo
+
+datos %>%
+  filter(year(fecha_del_evento) %in% c(2024, 2025, 2026)) %>%
+  mutate(anio = year(fecha_del_evento)) %>%
+  janitor::tabyl(anio, sexo_paciente, show_na = TRUE) %>%
+  adorn_totals(where = c("row", "col")) %>%
+  adorn_percentages("row") %>%
+  adorn_pct_formatting(digits = 1) %>%
+  adorn_ns()
+
+# Nacionalidad
 
 
 
