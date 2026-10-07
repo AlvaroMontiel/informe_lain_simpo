@@ -131,8 +131,8 @@ datos <- datos %>%
     edad_categoria = cut(
     edad_calculada,
     breaks = c(0, 5, 11, 19, 24, 59, Inf),
-    labels = c("Infancia", "Niñez", "Adolescencia",
-               "Juventud", "Adultez", "Ancianidad"),
+    labels = c("Infancia 0-5", "Niñez 6-11", "Adolescencia 12-19",
+               "Juventud 20-24", "Adultez 25-59", "Ancianidad 60 y más"),
     include.lowest = TRUE,  # En el primer grupó incluye el primer valor 
     right = TRUE  # TRUE por defecto, abierto por la derecha
    )
@@ -152,9 +152,10 @@ skimr::skim(datos)
 
 
 ## Demográfico (Personas únicas, evitar distorcionar la distribución)
-## edad, nacionalidad 
+## Edad 
+### Estadísticos por edad
 datos %>% 
-  filter(year(fecha_del_evento) %in% c(2023, 2024, 2025, 2026)) %>%
+  filter(year(fecha_del_evento) %in% c(2024, 2025)) %>%
   group_by(anio = year(fecha_del_evento)) %>%
   summarise(
     min = min(edad_calculada, na.rm = TRUE), 
@@ -165,23 +166,130 @@ datos %>%
     Q1 = quantile(edad_calculada, prob = c(0.25), na.rm = TRUE),
     Q3 = quantile(edad_calculada, prob = c(0.75), na.rm = TRUE),
     .groups = "drop"
-  )  # Pendiente separar por personas únicas
-library(rstatix)
-rstatix::get_summary_stats(
-  edad_calculada,
-  type = "common"
-)
+  )  # TODO separar por personas únicas
+
+### Histograma
+datos %>% 
+  filter(year(fecha_del_evento) %in% c(2024, 2025)) %>%
+  mutate(anio = factor(year(fecha_del_evento))) %>%
+  ggplot(aes(x = edad_calculada)) +
+  geom_histogram(
+    bins = 15,
+    fill = "steelblue",
+    color = "white") +
+  facet_wrap(~ anio, ncol = 2, scales = "free_y") +
+  labs(
+    title = "Distribución de edad por año, 2024-2025",
+    x = "Edad",
+    y = "Frecuencia"
+  )+
+  theme_minimal()
+
+### Test de normalidad
+datos %>%
+  filter(year(fecha_del_evento) %in% c(2024, 2025)) %>%
+  mutate(anio = factor(year(fecha_del_evento))) %>%
+  group_by(anio) %>%
+  shapiro_test(edad_calculada)
+
+### QQ-plot: el más informativo
+qqnorm(datos$edad_calculada)
+qqline(datos$edad_calculada, col = "red")
+
+### Densidad de distribución 
+datos_2024 <- 
+  datos %>% filter(
+    year(fecha_del_evento) %in% c(2024))
+
+datos_2025 <- 
+  datos %>% filter(
+    year(fecha_del_evento) %in% c(2025))
+
+plot(density(datos_2024$edad_calculada), na.rm = TRUE)
+
+plot(density(datos_2025$edad_calculada), na.rm = TRUE)
+
+
+### histograma con la curva de distribucion
+
+datos_filt <- datos %>%
+  filter(year(fecha_del_evento) %in% c(2024, 2025),
+         !is.na(edad_calculada)) %>%
+  mutate(anio = factor(year(fecha_del_evento)))
+
+### Parámetros por año + grilla para dibujar cada curva
+curvas <- datos_filt %>%
+  group_by(anio) %>%
+  summarise(
+    media = mean(edad_calculada),
+    sd    = sd(edad_calculada),
+    min_x = min(edad_calculada),
+    max_x = max(edad_calculada),
+    .groups = "drop"
+  ) %>%
+  rowwise() %>%
+  mutate(x = list(seq(min_x, max_x, length.out = 200))) %>%
+  unnest(x) %>%
+  mutate(y = dnorm(x, mean = media, sd = sd))
+
+datos_filt %>%
+  ggplot(aes(x = edad_calculada)) +
+  geom_histogram(
+    aes(y = after_stat(density)),
+    bins = 15,
+    fill = "steelblue",
+    color = "white"
+  ) +
+  geom_line(
+    data = curvas,
+    aes(x = x, y = y),
+    color = "red",
+    linewidth = 1
+  ) +
+  facet_wrap(~ anio, ncol = 2, scales = "free_y") +
+  labs(
+    title = "Distribución de edad por año (2024-2025)",
+    subtitle = "Curva roja = normal teórica con media y sd de cada año",
+    x = "Edad",
+    y = "Densidad"
+  ) +
+  theme_minimal()
+
+# Edad Agrupada
+datos %>% filter(year(fecha_del_evento) %in% c(2024, 2025)) %>%
+  mutate(anio = year(fecha_del_evento)) %>%
+  group_by(anio) %>%
+  count(edad_categoria) %>%
+  mutate(porcentaje = (n/sum(n))*100)
+
+### Grafico de barras apiladas
+datos %>%
+  mutate(anio = year(fecha_del_evento)) %>%
+  filter(anio %in% c(2024, 2025)) %>% 
+  count(anio, edad_categoria) %>%
+  ggplot() + 
+  geom_col(
+    mapping = aes(
+      x = factor(anio),
+      fill = edad_categoria,
+      y = n
+    ))
+
+# Edad x sexo 
+
+
 
 # Sexo
 
 datos %>%
-  filter(year(fecha_del_evento) %in% c(2024, 2025, 2026)) %>%
+  filter(year(fecha_del_evento) %in% c(2024, 2025)) %>%
   mutate(anio = year(fecha_del_evento)) %>%
   janitor::tabyl(anio, sexo_paciente, show_na = TRUE) %>%
   adorn_totals(where = c("row", "col")) %>%
   adorn_percentages("row") %>%
   adorn_pct_formatting(digits = 1) %>%
   adorn_ns()
+
 
 # Nacionalidad
 
