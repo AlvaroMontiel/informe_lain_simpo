@@ -80,7 +80,7 @@ datos <- datos %>% mutate(across(all_of(variables_enteros), as.integer))
 
 # estandarizar nombre de las columnas
 
-names(datos) <- make_clean_names(names(datos))
+names(datos) <- janitor::make_clean_names(names(datos))
 
 # Seleccionar columnas 
 datos <- datos %>% 
@@ -136,23 +136,28 @@ datos <- datos %>%
     include.lowest = TRUE,  # En el primer grupó incluye el primer valor 
     right = TRUE  # TRUE por defecto, abierto por la derecha
    )
+  ) %>% filter(
+    subclasificacion == "Con intención suicida"
   )
   
+
 # Visión general del conjunto de datos
 skimr::skim(datos)
 
 ##########################
-### Análisis univariado
+### Análisis exploratorio
 
 ## Temporal (todos los eventos, incluye duplicados)
 ## Fecha del evento, semana epidemiologica
 ## Número de eventos por mes; distribución semanal 
 
-
+## TODO hacer las curvas epidemicas para la semana epidemiológica
+## TODO eventos menusales
+## TODO Curvas por establecimiento y comuna, 
 
 
 ## Demográfico (Personas únicas, evitar distorcionar la distribución)
-## Edad 
+#### Edad ####
 ### Estadísticos por edad
 datos %>% 
   filter(year(fecha_del_evento) %in% c(2024, 2025)) %>%
@@ -275,7 +280,298 @@ datos %>%
       y = n
     ))
 
-# Edad x sexo 
+#### Edad x sexo ####
+datos %>% 
+  filter(
+    year(fecha_del_evento) %in% c(2024, 2025),
+    sexo_paciente %in% c("Hombre", "Mujer")) %>%
+  group_by(anio = year(fecha_del_evento), sexo_paciente) %>%
+  summarise(
+    min = min(edad_calculada, na.rm = TRUE), 
+    max = max(edad_calculada, na.rm = TRUE),
+    media = mean(edad_calculada, na.rm = TRUE),
+    mediana = median(edad_calculada, na.rm = TRUE),
+    DE = sd(edad_calculada, na.rm = TRUE),
+    Q1 = quantile(edad_calculada, prob = c(0.25), na.rm = TRUE),
+    Q3 = quantile(edad_calculada, prob = c(0.75), na.rm = TRUE),
+    .groups = "drop"
+  )  # TODO separar por personas únicas
+
+### tabla edad por sexo
+datos %>% filter(
+  year(fecha_del_evento) %in% c(2024, 2025),
+  sexo_paciente %in% c("Hombre", "Mujer")) %>%
+  mutate(anio = year(fecha_del_evento)) %>%
+  group_by(anio) %>%
+  count(sexo_paciente) %>%
+  mutate(porcentaje = (n/sum(n))*100)
+
+### Histograma edad x sexo
+datos %>% 
+  filter(year(fecha_del_evento) %in% c(2024, 2025) & sexo_paciente %in% c("Hombre", "Mujer")) %>%
+  mutate(anio = factor(year(fecha_del_evento))) %>%
+  ggplot(aes(x = edad_calculada)) +
+  geom_histogram(
+    bins = 15,
+    fill = "steelblue",
+    color = "white") +
+  facet_wrap(anio ~ sexo_paciente, ncol = 2, scales = "free_y") +
+  labs(
+    title = "Distribución de edad por año, 2024-2025",
+    x = "Edad",
+    y = "Frecuencia"
+  )+
+  theme_minimal()
+
+### Test de normalidad edad x sexo
+resultado <- datos %>%
+  filter(year(fecha_del_evento) %in% c(2024, 2025) & sexo_paciente %in% c("Hombre", "Mujer")) %>%
+  mutate(anio = factor(year(fecha_del_evento))) %>%
+  group_by(anio, sexo_paciente) %>%
+  shapiro_test(edad_calculada)
+
+resultado
+
+### QQ-plot: el más informativo
+datos %>% 
+  filter(year(fecha_del_evento) %in% c(2024, 2025) & sexo_paciente %in% c("Hombre", "Mujer")) %>%
+  mutate(anio = factor(year(fecha_del_evento))) %>%
+  group_by(anio, sexo_paciente) %>%
+  ggplot(
+    aes(sample = edad_calculada, fill = sexo_paciente)) +
+  stat_qq(size = 1.2, alpha = 0.4)+
+  stat_qq_line(linewidth = 0.8)+
+  facet_grid(anio ~ sexo_paciente, scales = "free")+ 
+  labs(
+    title = "QQ-plots de edad por año y sexo (2024-2025)",
+    subtitle = "Puntos alineados con la línea = distribución aproximadamente normal",
+    x = "Cuantiles teóricos (normal)",
+    y = "Cuantiles observados (edad)",
+    color = "Sexo"
+  )+
+  theme_minimal()+
+  theme(legend.position = "bottom")
+  
+  
+### Densidad de distribución 
+datos %>%
+  filter(
+    year(fecha_del_evento) %in% c(2024, 2025),
+    sexo_paciente %in% c("Hombre", "Mujer")
+  ) %>%
+  mutate(anio = factor(year(fecha_del_evento))) %>%
+  ggplot(aes(x = edad_calculada, fill = anio, color = anio)) +
+  geom_density(alpha = 0.4, na.rm = TRUE) +
+  facet_wrap(~ sexo_paciente, ncol = 2) +
+  labs(
+    title = "Densidad de edad por sexo y año, 2024-2025",
+    x = "Edad",
+    y = "Densidad",
+    fill = "Año",
+    color = "Año"
+  ) +
+  theme_minimal()
+
+### Histograma con la curva normal teorica con md y sd para cada año
+datos_filt <- datos %>%
+  filter(
+    year(fecha_del_evento) %in% c(2024, 2025),
+    !is.na(edad_calculada),
+    sexo_paciente %in% c("Hombre", "Mujer")
+  ) %>%
+  mutate(
+    anio         = factor(year(fecha_del_evento)),
+    sexo_paciente = factor(sexo_paciente)   # <- forzar factor en ambos
+  )
+
+# Curvas teóricas: una por combinación año × sexo
+curvas <- datos_filt %>%
+  group_by(anio, sexo_paciente) %>%
+  summarise(
+    media   = mean(edad_calculada),
+    sd      = sd(edad_calculada),
+    min_x   = min(edad_calculada),
+    max_x   = max(edad_calculada),
+    n       = n(),
+    .groups = "drop"
+  ) %>%
+  rowwise() %>%
+  mutate(x = list(seq(min_x, max_x, length.out = 200))) %>%
+  unnest(x) %>%
+  ungroup() %>%
+  mutate(y = dnorm(x, mean = media, sd = sd))
+
+# Verificación: debe haber 4 combinaciones con media/sd distintas
+curvas %>% distinct(anio, sexo_paciente, media, sd, n)
+
+ggplot(datos_filt, aes(x = edad_calculada)) +
+  geom_histogram(
+    aes(y = after_stat(density), fill = sexo_paciente),
+    bins = 15,
+    color = "white",
+    alpha = 0.7
+  ) +
+  geom_line(
+    data = curvas,
+    aes(x = x, y = y),
+    color = "red",
+    linewidth = 1,
+    inherit.aes = FALSE
+  ) +
+  facet_grid(anio ~ sexo_paciente) +
+  labs(
+    title    = "Distribución de edad por año y sexo (2024-2025)",
+    subtitle = "Curva roja = normal teórica con media y sd de cada grupo",
+    x = "Edad", y = "Densidad", fill = "Sexo"
+  ) +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+### t-test media de edad por sexo 
+t_student <- datos %>%
+  filter(
+    year(fecha_del_evento) %in% c(2024, 2025),
+    sexo_paciente %in% c("Hombre", "Mujer"),
+    !is.na(edad_calculada)
+  ) %>%
+  mutate(anio = factor(year(fecha_del_evento))) %>%
+  group_by(anio) %>%
+  t_test(
+    edad_calculada ~ sexo_paciente,
+    var.equal = TRUE,  # Prueba t de Student (supone varianzas iguales)
+    detailed = TRUE
+    )
+
+t_student
+
+### t de Welch media de edad por sexo
+t_welch <- datos %>%
+  filter(
+    year(fecha_del_evento)  %in% c(2024, 2025),
+    sexo_paciente %in% c("Hombre", "Mujer"),
+    !is.na(edad_calculada)
+  ) %>%
+  mutate(anio = factor(year(fecha_del_evento))) %>%
+  group_by(anio) %>%
+  t_test(
+    edad_calculada ~ sexo_paciente,
+    var.equal = FALSE,  # Prueba t de Welch (no exige varianzas iguales)
+    detailed = TRUE
+  )
+
+t_welch
+
+#### Nota metodológica:
+#### Welch no exige igualdad de varianzas entre grupos
+#### Funciona bien con grupos de diferentes tamaños, a pesar de la DS similar
+#### Welch no corrige la asimetría, Student y Welch pueden verse afectados por la asimentría
+#### Lo ppal para elegirlo esla diferencia de los grupos
+
+### test U de Mann-Whitney o suma de rangos de Wilcoxon
+
+u_wil <- datos %>%
+  filter(
+    year(fecha_del_evento)  %in% c(2024, 2025),
+    sexo_paciente %in% c("Hombre", "Mujer"),
+    !is.na(edad_calculada)
+  ) %>%
+  mutate(anio = factor(year(fecha_del_evento))) %>%
+  group_by(anio) %>%
+  wilcox_test(edad_calculada ~ sexo_paciente) %>%
+  mutate(
+    A_grupo1 = statistic / (n1 * n2),
+    porcentaje_grupo1 = A_grupo1 * 100,
+    porcentaje_grupo2 = 100 - porcentaje_grupo1
+  )
+
+u_wil
+#::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+# INTERPRETACIÓN: SUMA DE RANGOS DE WILCOXON / U DE MANN–WHITNEY
+#
+# Análisis real: comparación de edad entre mujeres y hombres,
+# por separado para 2024 y 2025.
+#
+# 1. ¿QUÉ COMPARA?
+# Compara los rangos de las edades individuales entre dos grupos
+# independientes. Evalúa si un grupo tiende a presentar edades mayores
+# que el otro. No compara directamente medias ni medianas.
+#
+# 2. SUPUESTOS Y ALCANCE
+# - No exige normalidad.
+# - Requiere observaciones independientes: los reintentos de una misma
+#   persona no deben tratarse como observaciones independientes.
+# - Puede interpretarse como una comparación de medianas si las
+#   distribuciones tienen formas similares y solo difieren en ubicación.
+# - No es una prueba que detecte cualquier diferencia de distribución.
+#
+# 3. VALOR p
+# Un p < 0,05 aporta evidencia contra la hipótesis nula de distribuciones
+# iguales, al nivel de significación elegido.
+# El valor p NO indica la dirección ni la magnitud de la diferencia.
+# Un p >= 0,05 NO demuestra que las distribuciones sean iguales.
+#
+# 4. DIRECCIÓN Y MAGNITUD: A
+# En esta salida de R, statistic corresponde a U del primer grupo.
+#
+# A = statistic / (n1 * n2)
+#
+# n1 * n2 es el número total de parejas posibles entre ambos grupos.
+#
+# A = P(edad grupo1 > edad grupo2) + 0,5 * P(edades iguales)
+#
+# - A > 0,50: predominan edades mayores en grupo1.
+# - A < 0,50: predominan edades mayores en grupo2.
+# - A = 0,50: equilibrio en el predominio; no garantiza distribuciones iguales.
+#
+# El complemento:
+# 1 - A = P(edad grupo1 < edad grupo2) + 0,5 * P(edades iguales)
+#
+# Estos porcentajes describen COMPARACIONES ENTRE PARES.
+# NO representan porcentajes de personas pertenecientes a cada grupo.
+# A puede calcularse aunque la prueba no sea significativa.
+#
+# 5. RESULTADOS REALES: group1 = Mujer; group2 = Hombre
+# 2024: p = 0,0207; A = 0,429; complemento = 0,571.
+# 2025: p = 0,00287; A = 0,431; complemento = 0,569.
+#
+# Interpretación:
+# Las edades de los hombres tienden a ser mayores que las de las mujeres.
+# Al comparar al azar una persona de cada sexo entre las notificadas,
+# la comparación favorece una edad mayor en el hombre aproximadamente
+# el 57 % de las veces, contabilizando los empates por mitad.
+#
+# El 57 % no es la probabilidad estricta de edad mayor: incluye medio empate.
+# La magnitud de esta tendencia es muy similar en ambos años, aunque
+# los valores p difieren. No implica separación completa entre grupos.
+#
+# 6. MEDIANAS COMO DESCRIPCIÓN
+# 2024: hombres = 24 años; mujeres = 21 años.
+# 2025: hombres = 25,5 años; mujeres = 22 años.
+#
+# Las medianas y los cuartiles describen las edades.
+# Mann–Whitney no contrasta específicamente estas diferencias de medianas.
+#
+# 7. REDACCIÓN PARA EL INFORME
+# "Se observaron diferencias estadísticamente significativas en la
+# distribución de edad entre sexos en 2024 y 2025, con tendencia a
+# edades mayores en hombres (p = 0,0207 y p = 0,00287, respectivamente)."
+#
+# 8. CAMBIAR EL ORDEN DE LOS GRUPOS
+# Invertir group1 y group2 reemplaza A por 1 - A.
+# El valor p bilateral y el hallazgo epidemiológico no cambian.
+#
+# 9. DIFERENCIA RESPECTO DE WELCH
+# Welch compara medias; Mann–Whitney compara rangos.
+# Pueden producir valores p distintos porque responden preguntas distintas.
+# No elegir entre ellas según cuál resulte significativa.
+#
+# Los ejemplos de peso, semana epidemiológica y métodos de autolesión
+# fueron únicamente ilustrativos; no son resultados de este análisis.
+#::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
+
+
+
+
 
 
 
