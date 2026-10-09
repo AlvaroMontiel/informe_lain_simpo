@@ -1,4 +1,4 @@
-# Paquetes
+#### Paquetes ####
 library(here)
 library(readxl)
 library(tidyverse)
@@ -6,14 +6,15 @@ library(janitor)
 library(skimr)
 library(naniar)
 library(rstatix)
+library(gtsummary)
 
-# Carga de datos
+#### Carga de datos ####
 ruta <- here("data", "input", "set_datos_lain_para_analisis.xlsx")
 
 datos <- readxl::read_excel(ruta)
 View(datos)
 
-### Estructura y revisión de los datos 
+#### Estructura y revisión de los datos ####
 
 dim(datos)  # Filas y columnas
 names(datos)  # Nombre de las columnas
@@ -21,7 +22,7 @@ head(datos)
 summary(datos)  # Resumen estadístico
 
 
-### Limpiar tipos
+#### Limpiar tipos ####
 
 variables_date <- c(
   "Fecha Atencion Urgencia", 
@@ -78,11 +79,11 @@ datos <- datos %>% mutate(
 
 datos <- datos %>% mutate(across(all_of(variables_enteros), as.integer))
 
-# estandarizar nombre de las columnas
+#### estandarizar nombre de las columnas ####
 
 names(datos) <- janitor::make_clean_names(names(datos))
 
-# Seleccionar columnas 
+#### Seleccionar columnas ####
 datos <- datos %>% 
   select(x1,
          compare_key,
@@ -125,7 +126,7 @@ datos <- datos %>%
          es_duplicado
   )
    
-# grupos de edad
+#### grupos de edad ####
 datos <- datos %>%
   mutate(
     edad_categoria = cut(
@@ -141,13 +142,14 @@ datos <- datos %>%
   )
   
 
-# Visión general del conjunto de datos
+#### Visión general del conjunto de datos ####
 skimr::skim(datos)
 
-##########################
+
+###############################################################################
 ### Análisis exploratorio
 
-## Temporal (todos los eventos, incluye duplicados)
+#### Temporal (todos los eventos, incluye duplicados) ####
 ## Fecha del evento, semana epidemiologica
 ## Número de eventos por mes; distribución semanal 
 
@@ -156,7 +158,7 @@ skimr::skim(datos)
 ## TODO Curvas por establecimiento y comuna, 
 
 
-## Demográfico (Personas únicas, evitar distorcionar la distribución)
+
 #### Edad ####
 ### Estadísticos por edad
 datos %>% 
@@ -260,12 +262,24 @@ datos_filt %>%
   ) +
   theme_minimal()
 
-# Edad Agrupada
-datos %>% filter(year(fecha_del_evento) %in% c(2024, 2025)) %>%
+#### Edad Agrupada ####
+datos_agg <- datos %>% 
+  filter(year(fecha_del_evento) %in% c(2024, 2025)) %>%
   mutate(anio = year(fecha_del_evento)) %>%
-  group_by(anio) %>%
-  count(edad_categoria) %>%
-  mutate(porcentaje = (n/sum(n))*100)
+  count(anio, edad_categoria)
+
+datos_agg
+
+datos_agg %>%
+  group_by(edad_categoria) %>%
+  summarise(
+    Año_2024 = sum(n[anio == 2024]),
+    Año_2025 = sum(n[anio == 2025]),
+  ) %>%
+  adorn_totals() %>% 
+  adorn_percentages("col") %>%
+  adorn_pct_formatting() %>%
+  adorn_ns(position = "front")
 
 ### Grafico de barras apiladas
 datos %>%
@@ -279,7 +293,7 @@ datos %>%
       fill = edad_categoria,
       y = n
     ))
-
+####
 #### Edad x sexo ####
 datos %>% 
   filter(
@@ -297,14 +311,32 @@ datos %>%
     .groups = "drop"
   )  # TODO separar por personas únicas
 
-### tabla edad por sexo
-datos %>% filter(
-  year(fecha_del_evento) %in% c(2024, 2025),
-  sexo_paciente %in% c("Hombre", "Mujer")) %>%
+### tabla edad por sexo y año
+datos_agg <- datos %>%
+  filter(
+    year(fecha_del_evento) %in% c(2024, 2025),
+    !is.na(edad_calculada),
+    sexo_paciente %in% c("Hombre", "Mujer")) %>%
   mutate(anio = year(fecha_del_evento)) %>%
-  group_by(anio) %>%
-  count(sexo_paciente) %>%
-  mutate(porcentaje = (n/sum(n))*100)
+  count(anio, edad_categoria, sexo_paciente)
+  
+print(n = 40, datos_agg)
+
+datos_agg %>% 
+  group_by(anio, sexo_paciente) %>%
+  summarise(
+    Niñez = sum(n[edad_categoria == "Niñez 6-11"], na.rm = T),
+    Adolescencia = sum(n[edad_categoria == "Adolescencia 12-19"], na.rm = T),
+    Juventud = sum(n[edad_categoria == "Juventud 20-24"], na.rm = T),
+    Adultez = sum(n[edad_categoria == "Adultez 25-59"], na.rm = T),
+    Ancianidad = sum(n[edad_categoria == "Ancianidad 60 y más"], na.rm = T),
+    total = sum(n, na.rm = T)
+  ) %>%
+  adorn_totals() %>%
+  adorn_percentages("col") %>%                      
+  adorn_pct_formatting() %>%
+  adorn_ns(position = "front") 
+
 
 ### Histograma edad x sexo
 datos %>% 
@@ -427,6 +459,7 @@ ggplot(datos_filt, aes(x = edad_calculada)) +
   theme_minimal() +
   theme(legend.position = "bottom")
 
+#### Test estadísticos edad x sexo ####
 ### t-test media de edad por sexo 
 t_student <- datos %>%
   filter(
@@ -569,51 +602,311 @@ u_wil
 # fueron únicamente ilustrativos; no son resultados de este análisis.
 #::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
 
-
-
-
-
-
-
-# Sexo
-
+####
+#### Edad x metodo de autolesion ####
 datos %>%
-  filter(year(fecha_del_evento) %in% c(2024, 2025)) %>%
+  filter(
+    year(fecha_del_evento) %in% c(2025),
+    !is.na(edad_calculada)) %>%
   mutate(anio = year(fecha_del_evento)) %>%
-  janitor::tabyl(anio, sexo_paciente, show_na = TRUE) %>%
-  adorn_totals(where = c("row", "col")) %>%
-  adorn_percentages("row") %>%
-  adorn_pct_formatting(digits = 1) %>%
-  adorn_ns()
+  drop_na(metodo_de_lesion) %>%
+  group_by(anio, metodo_de_lesion) %>%
+  summarise(
+    n = n(),
+    min = min(edad_calculada, na.rm = TRUE), 
+    max = max(edad_calculada, na.rm = TRUE),
+    media = mean(edad_calculada, na.rm = TRUE),
+    mediana = median(edad_calculada, na.rm = TRUE),
+    DE = sd(edad_calculada, na.rm = TRUE),
+    Q1 = quantile(edad_calculada, prob = c(0.25), na.rm = TRUE),
+    Q3 = quantile(edad_calculada, prob = c(0.75), na.rm = TRUE),
+    .groups = "drop"
+  )
+
+datos_agg <- datos %>%
+  filter(
+    year(fecha_del_evento) %in% c(2025),
+    !is.na(edad_calculada)) %>%
+  mutate(anio = year(fecha_del_evento)) %>%
+  drop_na(metodo_de_lesion) %>%
+  count(anio, edad_categoria, metodo_de_lesion)
+
+print(n = 40, datos_agg)
+
+datos_agg %>% 
+  group_by(anio, metodo_de_lesion) %>%
+  summarise(
+    Niñez = sum(n[edad_categoria == "Niñez 6-11"], na.rm = T),
+    Adolescencia = sum(n[edad_categoria == "Adolescencia 12-19"], na.rm = T),
+    Juventud = sum(n[edad_categoria == "Juventud 20-24"], na.rm = T),
+    Adultez = sum(n[edad_categoria == "Adultez 25-59"], na.rm = T),
+    Ancianidad = sum(n[edad_categoria == "Ancianidad 60 y más"], na.rm = T),
+    total = sum(n, na.rm = T)
+  ) %>%
+  adorn_totals() %>%
+  adorn_percentages("col") %>%                      
+  adorn_pct_formatting() %>%
+  adorn_ns(position = "front") 
+
+#### Sexo x metodo de autolesion ####
+datos_agg <- datos %>%
+  filter(
+    year(fecha_del_evento) %in% c(2025),
+    !is.na(edad_calculada),
+    sexo_paciente %in% c("Hombre", "Mujer")
+  ) %>%
+  mutate(anio = year(fecha_del_evento)) %>%
+  drop_na(metodo_de_lesion) %>%
+  count(anio, sexo_paciente, metodo_de_lesion)
+  
+print(n = 40, datos_agg)
+
+datos_agg %>% 
+  group_by(anio, metodo_de_lesion) %>%
+  summarise(
+    hombres = sum(n[sexo_paciente == "Hombre"], na.rm = T),
+    mujeres = sum(n[sexo_paciente == "Mujer"], na.rm = T),
+    total = sum(n, na.rm = T)
+  ) %>%
+  adorn_totals() %>%
+  adorn_percentages("col") %>%                      
+  adorn_pct_formatting() %>%
+  adorn_ns(position = "front") 
 
 
-# Nacionalidad
+#### Edad x sexo x metodo de lesion x año ####
+tabla <- datos %>%
+  filter(
+    year(fecha_del_evento) == 2025,
+    !is.na(edad_calculada),
+    sexo_paciente %in% c("Hombre", "Mujer")
+  ) %>%
+  count(metodo_de_lesion, edad_categoria, sexo_paciente) %>%
+  pivot_wider(
+    names_from  = c(sexo_paciente, edad_categoria),
+    values_from = n,
+    values_fill = 0,
+    names_sep   = "_"
+  ) %>%
+  adorn_totals() %>%
+  adorn_percentages("col") %>%                      
+  adorn_pct_formatting() %>%
+  adorn_ns(position = "front") 
+
+tabla
+
+#### Nacionalidad ####
+datos_agg <- datos %>% 
+  filter(
+    year(fecha_del_evento) %in% c(2024, 2025)) %>%
+  mutate(anio = year(fecha_del_evento)) %>%
+  count(anio, nacionalidad_paciente)
+  
+datos_agg
+  
+datos_agg %>%
+  group_by(nacionalidad_paciente) %>%
+  summarise(
+    año_2024 = sum(n[anio == 2024]),
+    año_2025 = sum(n[anio == 2025])
+  ) %>% 
+  adorn_totals() %>%
+  adorn_percentages("col") %>%                      
+  adorn_pct_formatting() %>%
+  adorn_ns(position = "front") 
+  
+#### Identidad de genero ####
+datos_agg <- datos %>% 
+  filter(
+    year(fecha_del_evento) %in% c(2024, 2025)) %>%
+  mutate(anio = year(fecha_del_evento)) %>%
+  count(anio, identidad_de_genero)
+
+datos_agg
+
+datos_agg %>%
+  group_by(identidad_de_genero) %>%
+  summarise(
+    año_2024 = sum(n[anio == 2024]),
+    año_2025 = sum(n[anio == 2025])
+  # summarise(
+  #   femenino = sum(n[identidad_de_genero == "Femenina"]),
+  #   masculino = sum(n[identidad_de_genero == "Masculino"]),
+  #   no_binarie = sum(n[identidad_de_genero == "No Binarie"]),
+  #   sin_informacion = sum(n[identidad_de_genero == "No hay Informacion"]),
+  #   otra = sum(n[identidad_de_genero == "Otra"]),
+  #   trans_femenina = sum(n[identidad_de_genero == "Transgenero Femenina"]),
+  #   trans_mnasculino = sum(n[identidad_de_genero == "Transgenero Masculino"]),
+  ) %>% 
+  adorn_totals() %>%
+  adorn_percentages("col") %>%                      
+  adorn_pct_formatting() %>%
+  adorn_ns(position = "front") 
+
+#### Oriencacion sexual ####
+datos_agg <- datos %>% 
+  filter(
+    year(fecha_del_evento) %in% c(2024, 2025)) %>%
+  mutate(anio = year(fecha_del_evento)) %>%
+  count(anio, orientacion_sexual)
+
+datos_agg
+
+datos_agg %>%
+  group_by(orientacion_sexual) %>%
+  summarise(
+    año_2024 = sum(n[anio == 2024]),
+    año_2025 = sum(n[anio == 2025])
+  ) %>% 
+  adorn_totals() %>%
+  adorn_percentages("col") %>%                      
+  adorn_pct_formatting() %>%
+  adorn_ns(position = "front") 
+
+#### Pertenencia a pueblo originario ####
+datos_agg <- datos %>% 
+  filter(
+    year(fecha_del_evento) %in% c(2024, 2025)) %>%
+  mutate(anio = year(fecha_del_evento)) %>%
+  count(anio, pueblo_originario)
+
+datos_agg
+
+datos_agg %>%
+  group_by(pueblo_originario) %>%
+  summarise(
+    año_2024 = sum(n[anio == 2024]),
+    año_2025 = sum(n[anio == 2025])
+  ) %>% 
+  adorn_totals() %>%
+  adorn_percentages("col") %>%                      
+  adorn_pct_formatting() %>%
+  adorn_ns(position = "front") 
+
+#### Lugar del evento ####
+datos_agg <- datos %>% 
+  filter(
+    year(fecha_del_evento) %in% c(2024, 2025)) %>%
+  mutate(anio = year(fecha_del_evento)) %>%
+  count(anio, lugar_del_evento)
+
+datos_agg
+
+datos_agg %>%
+  group_by(lugar_del_evento) %>%
+  summarise(
+    año_2024 = sum(n[anio == 2024]),
+    año_2025 = sum(n[anio == 2025])
+  ) %>% 
+  adorn_totals() %>%
+  adorn_percentages("col") %>%                      
+  adorn_pct_formatting() %>%
+  adorn_ns(position = "front") 
+
+#### Establecimiento de notificación ####
+datos_agg <- datos %>% 
+  filter(
+    year(fecha_del_evento) %in% c(2024, 2025)) %>%
+  mutate(anio = year(fecha_del_evento)) %>%
+  count(anio, establecimiento_salud)
+
+datos_agg
+
+datos_agg %>%
+  group_by(establecimiento_salud) %>%
+  summarise(
+    año_2024 = sum(n[anio == 2024]),
+    año_2025 = sum(n[anio == 2025])
+  ) %>% 
+  adorn_totals() %>%
+  adorn_percentages("col") %>%                      
+  adorn_pct_formatting() %>%
+  adorn_ns(position = "front") 
+
+#### Comuna de notificación ####
+datos_agg <- datos %>% 
+  filter(
+    year(fecha_del_evento) %in% c(2023, 2024, 2025, 2026)) %>%
+  mutate(anio = year(fecha_del_evento)) %>%
+  count(anio, comuna)
+
+datos_agg
+
+datos_agg %>%
+  group_by(comuna) %>%
+  summarise(
+    año_2023 = sum(n[anio == 2023]),
+    año_2024 = sum(n[anio == 2024]),
+    año_2025 = sum(n[anio == 2025]),
+    año_2026 = sum(n[anio == 2026])
+  ) %>% 
+  adorn_totals() %>%
+  adorn_percentages("col") %>%                      
+  adorn_pct_formatting() %>%
+  adorn_ns(position = "front") 
+
+#### Región de residencia del paciente ####
+
+datos_agg <- datos %>% 
+  filter(
+    year(fecha_del_evento) %in% c(2024, 2025)) %>%
+  mutate(anio = year(fecha_del_evento)) %>%
+  count(anio, comuna_paciente)
+
+datos_agg
+
+datos_agg %>%
+  group_by(comuna_paciente) %>%
+  summarise(
+    año_2024 = sum(n[anio == 2024]),
+    año_2025 = sum(n[anio == 2025])
+  ) %>% 
+  adorn_totals() %>%
+  adorn_percentages("col") %>%                      
+  adorn_pct_formatting() %>%
+  adorn_ns(position = "front") 
+
+#### Antecedentes salud mental ####
+datos_agg <- datos %>% 
+  filter(
+    year(fecha_del_evento) %in% c(2024, 2025)) %>%
+  mutate(anio = year(fecha_del_evento)) %>%
+  count(anio, tiene_antecedentes_salud_mental)
+
+datos_agg
+
+datos_agg %>%
+  group_by(tiene_antecedentes_salud_mental) %>%
+  summarise(
+    año_2024 = sum(n[anio == 2024]),
+    año_2025 = sum(n[anio == 2025])
+  ) %>% 
+  adorn_totals() %>%
+  adorn_percentages("col") %>%                      
+  adorn_pct_formatting() %>%
+  adorn_ns(position = "front") 
 
 
+#### Tratamiento salud mental ####
 
+datos_agg <- datos %>% 
+  filter(
+    year(fecha_del_evento) %in% c(2024, 2025)) %>%
+  mutate(anio = year(fecha_del_evento)) %>%
+  count(anio, tiene_tratamiento_salud_mental)
 
-## Identidad y pertenencia (Personas únicas, evitar distorcionar la distribución)
-## identidad de género, orientación sexual, pertenencia y pueblo originario
+datos_agg
 
-## Residencia (Personas únicas, evitar distorcionar la distribución)
-## Región y comuna de residencia del paciente
-
-## Notificación (Total de eventos notificados)
-## Comuna y establecimiento de notificación
-
-## Características del evento (Total de eventos)
-## Subclasificación, método de lesión, lugar del evento
-
-## Salud mental (Personas únicas, evitar distorcionar la distribución)
-## Antecedentes, descripción libre, tratamiento
-
-## Contexto social (Total de eventos)
-## Acompañante, estudia/trabaja
-
-## Territorio de actividades(Total de eventos)
-## Región y comuna de estudios y/o trabajo
-
-
+datos_agg %>%
+  group_by(tiene_tratamiento_salud_mental) %>%
+  summarise(
+    año_2024 = sum(n[anio == 2024]),
+    año_2025 = sum(n[anio == 2025])
+  ) %>% 
+  adorn_totals() %>%
+  adorn_percentages("col") %>%                      
+  adorn_pct_formatting() %>%
+  adorn_ns(position = "front") 
 
 
 
